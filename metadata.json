@@ -1,0 +1,6 @@
+{
+  "name": "PLAYVERSE 35",
+  "description": "Koleksi 35 mini-game modern, adiktif, ringan, dan offline-first lengkap dengan sistem level, pencapaian, dan kontrol sentuh mobile.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
