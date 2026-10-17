@@ -1,0 +1,1158 @@
+import React, { useState, useEffect } from 'react';
+import {
+  UserProfile,
+  GameItem,
+  MissionItem,
+  LeaderboardItem,
+  TransactionItem,
+  AchievementItem,
+  ReferralFriend,
+  ActivityFeedItem,
+} from './types';
+import {
+  INITIAL_USER,
+  INITIAL_GAMES,
+  INITIAL_MISSIONS,
+  INITIAL_LEADERBOARD,
+  INITIAL_TRANSACTIONS,
+  INITIAL_ACHIEVEMENTS,
+  INITIAL_REFERRAL_FRIENDS,
+  INITIAL_ACTIVITIES,
+} from './data/initialData';
+import { soundManager } from './utils/audio';
+import { Header } from './components/Header';
+import { UserXpProgressBar } from './components/UserXpProgressBar';
+import { Navbar } from './components/Navbar';
+import { HomeTab } from './components/HomeTab';
+import { GamesTab } from './components/GamesTab';
+import { MissionsTab } from './components/MissionsTab';
+import { WalletTab } from './components/WalletTab';
+import { ProfileTab } from './components/ProfileTab';
+import { AdminTab } from './components/AdminTab';
+import { LeaderboardModal } from './components/LeaderboardModal';
+import { ToastContainer, ToastMessage } from './components/Toast';
+import { getDeterministicGameNightId } from './components/GameNightEventBanner';
+import confetti from 'canvas-confetti';
+
+// Mini-game implementations
+import { CoinCatcherGame } from './components/games/CoinCatcherGame';
+import { NumberRushGame } from './components/games/NumberRushGame';
+import { MemoryMatchGame } from './components/games/MemoryMatchGame';
+import { ColorReflexGame } from './components/games/ColorReflexGame';
+
+const SAMPLE_NAMES = [
+  { name: 'Fajar Nugraha', username: 'fajar_nug' },
+  { name: 'Dewi Lestari', username: 'dewi_gaming' },
+  { name: 'Ilham Ramadhan', username: 'ilham_speed' },
+  { name: 'Anisa Maharani', username: 'anisa_m' },
+  { name: 'Rangga Wijaya', username: 'rangga_pro' },
+];
+
+const SAMPLE_AVATARS = [
+  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80',
+  'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=120&q=80',
+  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80',
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&q=80',
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80',
+];
+
+export default function App() {
+  // Local storage initialized states
+  const [user, setUser] = useState<UserProfile>(() => {
+    try {
+      const saved = localStorage.getItem('nexa_user_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...INITIAL_USER,
+          ...parsed,
+          rewardPoints: Number(parsed.rewardPoints ?? INITIAL_USER.rewardPoints),
+          estimatedIdr: Number(parsed.estimatedIdr ?? parsed.rewardPoints ?? INITIAL_USER.estimatedIdr),
+          referralRewardTotal: Number(parsed.referralRewardTotal ?? INITIAL_USER.referralRewardTotal ?? 0),
+          totalWithdrawn: Number(parsed.totalWithdrawn ?? INITIAL_USER.totalWithdrawn ?? 0),
+          totalGamesPlayed: Number(parsed.totalGamesPlayed ?? INITIAL_USER.totalGamesPlayed ?? 0),
+          xp: Number(parsed.xp ?? INITIAL_USER.xp ?? 0),
+          nextLevelXp: Number(parsed.nextLevelXp ?? INITIAL_USER.nextLevelXp ?? 5000),
+          level: Number(parsed.level ?? INITIAL_USER.level ?? 1),
+          streak: Number(parsed.streak ?? INITIAL_USER.streak ?? 0),
+          musicVolume: Number(parsed.musicVolume ?? 70),
+          sfxVolume: Number(parsed.sfxVolume ?? 85),
+          ambientVolume: Number(parsed.ambientVolume ?? 40),
+        };
+      }
+    } catch {}
+    return INITIAL_USER;
+  });
+
+  const [games, setGames] = useState<GameItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('nexa_games_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_GAMES;
+  });
+
+  const [missions, setMissions] = useState<MissionItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('nexa_missions_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_MISSIONS;
+  });
+
+  const [leaderboard] = useState<LeaderboardItem[]>(INITIAL_LEADERBOARD);
+
+  const [transactions, setTransactions] = useState<TransactionItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('nexa_txs_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_TRANSACTIONS;
+  });
+
+  const [achievements, setAchievements] = useState<AchievementItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('nexa_achievements_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_ACHIEVEMENTS;
+  });
+
+  const [referralFriends, setReferralFriends] = useState<ReferralFriend[]>(() => {
+    try {
+      const saved = localStorage.getItem('nexa_referral_friends_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.map((f: any) => ({
+            ...f,
+            bonusRp: Number(f.bonusRp ?? 2500),
+          }));
+        }
+      }
+    } catch {}
+    return INITIAL_REFERRAL_FRIENDS;
+  });
+
+  const [activities, setActivities] = useState<ActivityFeedItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('nexa_activities_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_ACTIVITIES;
+  });
+
+  // UI Navigation states
+  const [activeTab, setActiveTab] = useState<string>('home');
+  const [activeGame, setActiveGame] = useState<string | null>(null);
+  const [showLeaderboard, setShowLeaderboard] = useState<boolean>(false);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  // Sync to local storage
+  useEffect(() => {
+    localStorage.setItem('nexa_user_v1', JSON.stringify(user));
+  }, [user]);
+
+  useEffect(() => {
+    localStorage.setItem('nexa_games_v1', JSON.stringify(games));
+  }, [games]);
+
+  useEffect(() => {
+    localStorage.setItem('nexa_missions_v1', JSON.stringify(missions));
+  }, [missions]);
+
+  useEffect(() => {
+    localStorage.setItem('nexa_txs_v1', JSON.stringify(transactions));
+  }, [transactions]);
+
+  useEffect(() => {
+    localStorage.setItem('nexa_achievements_v1', JSON.stringify(achievements));
+  }, [achievements]);
+
+  useEffect(() => {
+    localStorage.setItem('nexa_referral_friends_v1', JSON.stringify(referralFriends));
+  }, [referralFriends]);
+
+  useEffect(() => {
+    localStorage.setItem('nexa_activities_v1', JSON.stringify(activities));
+  }, [activities]);
+
+  // Periodic automatic simulated live activity every 25 seconds for vibrant community feel
+  useEffect(() => {
+    const timer = setInterval(() => {
+      handleTriggerActivitySimulation();
+    }, 28000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Audio mute/unmute sync
+  useEffect(() => {
+    soundManager.setEnabled(user.soundEnabled);
+  }, [user.soundEnabled]);
+
+  // Theme synchronization (Deep Space vs Light Mode)
+  useEffect(() => {
+    const activeTheme = user.theme || 'deep-space';
+    if (activeTheme === 'light') {
+      document.documentElement.classList.add('theme-light');
+      document.documentElement.classList.remove('theme-deep-space');
+      document.documentElement.setAttribute('data-theme', 'light');
+      document.body.classList.add('theme-light');
+      document.body.classList.remove('theme-deep-space');
+    } else {
+      document.documentElement.classList.add('theme-deep-space');
+      document.documentElement.classList.remove('theme-light');
+      document.documentElement.setAttribute('data-theme', 'deep-space');
+      document.body.classList.add('theme-deep-space');
+      document.body.classList.remove('theme-light');
+    }
+  }, [user.theme]);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    const id = 'toast_' + Date.now() + Math.random().toString(36).substring(2, 6);
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  };
+
+  const handleDismissToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  // Daily Check-In with 7-Day 2x Multiplier Bonus
+  const handleCheckIn = () => {
+    if (user.checkedInToday) return;
+
+    const nextStreak = user.streak + 1;
+    // 7th day check-in applies a 2x Reward Point multiplier!
+    const is7DayStreak = nextStreak % 7 === 0;
+    const baseReward = 200;
+    const multiplier = is7DayStreak ? 2 : 1;
+    const rewardRp = baseReward * multiplier;
+
+    const todayIso = new Date().toISOString().split('T')[0];
+    setUser(prev => {
+      const nextRp = prev.rewardPoints + rewardRp;
+      const history = prev.checkInHistory || [];
+      const updatedHistory = history.includes(todayIso) ? history : [...history, todayIso];
+      return {
+        ...prev,
+        rewardPoints: nextRp,
+        estimatedIdr: nextRp,
+        streak: nextStreak,
+        checkedInToday: true,
+        lastCheckInDate: todayIso,
+        checkInHistory: updatedHistory,
+      };
+    });
+
+    const newTx: TransactionItem = {
+      id: 'tx_checkin_' + Date.now(),
+      type: 'checkin',
+      title: is7DayStreak
+        ? `Bonus Check-in Streak Hari ke-${nextStreak} (🔥 2x Multiplier Bonus)`
+        : `Bonus Check-in Streak Hari ke-${nextStreak}`,
+      amount: `+${rewardRp} RP`,
+      numericAmount: rewardRp,
+      time: 'Baru saja',
+      date: 'Hari ini',
+      status: 'success',
+    };
+
+    setTransactions(prev => [newTx, ...prev]);
+
+    // Mark daily check-in mission as claimed
+    setMissions(prev =>
+      prev.map(m =>
+        m.id === 'm1' ? { ...m, progress: 1, status: 'claimed' as const } : m
+      )
+    );
+
+    if (is7DayStreak) {
+      soundManager.playLevelUp();
+      confetti({
+        particleCount: 120,
+        spread: 85,
+        origin: { y: 0.6 },
+      });
+
+      // Broadcast to activity feed
+      const streakActivity: ActivityFeedItem = {
+        id: 'act_streak7_' + Date.now(),
+        user: {
+          name: user.name,
+          username: user.username,
+          avatar: user.avatar,
+        },
+        type: 'jackpot',
+        title: 'Streak 7 Hari (2x Multiplier!)',
+        description: `mencapai 7-Day Streak dan meraih 2x Multiplier Bonus Check-in (+${rewardRp} RP)!`,
+        amount: `+${rewardRp} RP (2x 🔥)`,
+        time: 'Baru saja',
+        badgeText: '2x Bonus 🔥',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+      };
+      setActivities(prev => [streakActivity, ...prev]);
+
+      showToast(`🔥 FANTASTIS! Streak 7 Hari Tercapai! Bonus Pengganda 2x Lipat Aktif (+${rewardRp} RP)!`, 'success');
+    } else {
+      showToast(`Berhasil Check-in! +${rewardRp} RP ditambahkan ke dompet. Streak kamu: ${nextStreak} hari!`, 'success');
+    }
+  };
+
+  // Launch mini-game
+  const handleLaunchGame = (gameId: string) => {
+    soundManager.playClick();
+    setActiveGame(gameId);
+  };
+
+  // Close mini-game
+  const handleCloseGame = () => {
+    soundManager.playClick();
+    setActiveGame(null);
+  };
+
+  // Game completion
+  const handleGameComplete = (score: number, rpEarned: number, xpEarned: number) => {
+    const currentGame = games.find(g => g.id === activeGame);
+    const gameTitle = currentGame ? currentGame.title : 'Mini-Game';
+
+    // Game Night 1.5x Multiplier evaluation
+    let gameNightFeaturedId = getDeterministicGameNightId(games);
+    try {
+      const saved = localStorage.getItem('nexa_game_night_featured');
+      if (saved && games.some(g => g.id === saved)) gameNightFeaturedId = saved;
+    } catch {}
+
+    const isGameNightActive = activeGame === gameNightFeaturedId;
+    const finalRpEarned = isGameNightActive ? Math.round(rpEarned * 1.5) : rpEarned;
+    const bonusRpAmount = finalRpEarned - rpEarned;
+
+    // Update user balance & XP
+    setUser(prev => {
+      let nextXp = prev.xp + xpEarned;
+      let nextLevel = prev.level;
+      let nextLevelCap = prev.nextLevelXp;
+
+      if (nextXp >= nextLevelCap) {
+        nextLevel += 1;
+        nextXp -= nextLevelCap;
+        nextLevelCap += 1500;
+        soundManager.playLevelUp();
+        showToast(`🎉 Selamat! Kamu naik ke Level ${nextLevel}!`, 'success');
+
+        const lvlActivity: ActivityFeedItem = {
+          id: 'act_user_lvl_' + Date.now(),
+          user: {
+            name: prev.name,
+            username: prev.username,
+            avatar: prev.avatar,
+          },
+          type: 'level_up',
+          title: `Naik ke Level ${nextLevel} Player`,
+          description: `baru saja naik ke Level ${nextLevel} Player di Nexa Play!`,
+          amount: `Level ${nextLevel} 👑`,
+          time: 'Baru saja',
+          badgeText: 'Level Up 🏆',
+          badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+        };
+        setActivities(currentActs => [lvlActivity, ...currentActs]);
+      }
+
+      const nextRp = prev.rewardPoints + finalRpEarned;
+
+      return {
+        ...prev,
+        level: nextLevel,
+        xp: nextXp,
+        nextLevelXp: nextLevelCap,
+        rewardPoints: nextRp,
+        estimatedIdr: nextRp,
+        totalGamesPlayed: prev.totalGamesPlayed + 1,
+      };
+    });
+
+    // Update game record
+    setGames(prev =>
+      prev.map(g => {
+        if (g.id === activeGame) {
+          return {
+            ...g,
+            playsCount: g.playsCount + 1,
+            bestScore: Math.max(g.bestScore, score),
+          };
+        }
+        return g;
+      })
+    );
+
+    // Record transaction
+    const newTx: TransactionItem = {
+      id: 'tx_game_' + Date.now(),
+      type: 'reward',
+      title: isGameNightActive
+        ? `Hadiah Skor ${score} di ${gameTitle} (Game Night 1.5x Multiplier 🌙)`
+        : `Hadiah Skor ${score} di ${gameTitle}`,
+      amount: `+${finalRpEarned} RP`,
+      numericAmount: finalRpEarned,
+      time: 'Baru saja',
+      date: 'Hari ini',
+      status: 'success',
+    };
+    setTransactions(prev => [newTx, ...prev]);
+
+    // Update missions
+    setMissions(prev =>
+      prev.map(m => {
+        if (m.id === 'm2' && activeGame === 'coin-catcher') {
+          const nextProg = Math.min(m.max, m.progress + 1);
+          return {
+            ...m,
+            progress: nextProg,
+            status: nextProg >= m.max ? 'claimable' : 'in_progress',
+          };
+        }
+        if (m.id === 'm3' && activeGame === 'number-rush' && score >= 1000) {
+          return {
+            ...m,
+            progress: 1000,
+            status: 'claimable',
+          };
+        }
+        if (m.id === 'm4') {
+          const nextProg = Math.min(m.max, m.progress + 1);
+          return {
+            ...m,
+            progress: nextProg,
+            status: nextProg >= m.max ? 'claimable' : 'in_progress',
+          };
+        }
+        if (m.id === 'm7' && activeGame === 'color-reflex') {
+          return {
+            ...m,
+            progress: 1,
+            status: 'claimable',
+          };
+        }
+        return m;
+      })
+    );
+
+    if (isGameNightActive) {
+      soundManager.playSuccess();
+      confetti({
+        particleCount: 50,
+        spread: 65,
+        origin: { y: 0.6 },
+      });
+      showToast(
+        `🌙 GAME NIGHT 1.5x BOOST! +${finalRpEarned} RP (+${bonusRpAmount} Bonus Malam) dan +${xpEarned} XP berhasil masuk dompet!`,
+        'success'
+      );
+    } else {
+      showToast(`+${finalRpEarned} RP dan +${xpEarned} XP berhasil diklaim ke akunmu!`, 'success');
+    }
+    setActiveGame(null);
+  };
+
+  // Claim Mission Reward
+  const handleClaimMission = (missionId: string) => {
+    const mission = missions.find(m => m.id === missionId);
+    if (!mission || mission.status !== 'claimable') return;
+
+    setUser(prev => {
+      let nextXp = prev.xp + mission.rewardXp;
+      let nextLevel = prev.level;
+      let nextLevelCap = prev.nextLevelXp;
+
+      if (nextXp >= nextLevelCap) {
+        nextLevel += 1;
+        nextXp -= nextLevelCap;
+        nextLevelCap += 1500;
+        soundManager.playLevelUp();
+      }
+
+      const nextRp = prev.rewardPoints + mission.rewardRp;
+      return {
+        ...prev,
+        level: nextLevel,
+        xp: nextXp,
+        nextLevelXp: nextLevelCap,
+        rewardPoints: nextRp,
+        estimatedIdr: nextRp,
+      };
+    });
+
+    setMissions(prev =>
+      prev.map(m =>
+        m.id === missionId ? { ...m, status: 'claimed' as const } : m
+      )
+    );
+
+    const newTx: TransactionItem = {
+      id: 'tx_mis_' + Date.now(),
+      type: 'mission',
+      title: `Hadiah Misi: ${mission.title}`,
+      amount: `+${mission.rewardRp} RP`,
+      numericAmount: mission.rewardRp,
+      time: 'Baru saja',
+      date: 'Hari ini',
+      status: 'success',
+    };
+    setTransactions(prev => [newTx, ...prev]);
+
+    showToast(`Hadiah misi berhasil diambil! +${mission.rewardRp} RP masuk ke dompet.`, 'success');
+  };
+
+  // DAILY GOAL: Claim Extra RP for completing at least 3 missions in a single day
+  const handleClaimDailyGoal = () => {
+    const completedCount = missions.filter(m => m.status === 'claimed').length;
+    if (completedCount < 3) {
+      soundManager.playError();
+      showToast(`Selesaikan minimal 3 misi terlebih dahulu! (${completedCount}/3 selesai)`, 'error');
+      return;
+    }
+    if (user.dailyGoalClaimed) {
+      showToast('Hadiah Target Harian sudah diklaim hari ini.', 'info');
+      return;
+    }
+
+    const bonusRp = 750;
+
+    setUser(prev => {
+      const nextRp = prev.rewardPoints + bonusRp;
+      return {
+        ...prev,
+        rewardPoints: nextRp,
+        estimatedIdr: nextRp,
+        dailyGoalClaimed: true,
+      };
+    });
+
+    const newTx: TransactionItem = {
+      id: 'tx_daily_goal_' + Date.now(),
+      type: 'mission',
+      title: 'Bonus Target Harian: Selesaikan 3 Misi',
+      amount: `+${bonusRp.toLocaleString()} RP`,
+      numericAmount: bonusRp,
+      time: 'Baru saja',
+      date: 'Hari ini',
+      status: 'success',
+    };
+    setTransactions(prev => [newTx, ...prev]);
+
+    confetti({
+      particleCount: 80,
+      spread: 80,
+      origin: { y: 0.6 },
+    });
+
+    showToast(`🎯 Luar Biasa! Bonus Target Harian +${bonusRp} RP berhasil diklaim ke dompetmu!`, 'success');
+  };
+
+  // LUCKY WHEEL: Spin won reward
+  const handleSpinLuckyWheel = (rpWon: number) => {
+    const now = Date.now();
+
+    setUser(prev => {
+      const nextRp = prev.rewardPoints + rpWon;
+      return {
+        ...prev,
+        rewardPoints: nextRp,
+        estimatedIdr: nextRp,
+        lastWheelSpinTimestamp: now,
+      };
+    });
+
+    const newTx: TransactionItem = {
+      id: 'tx_wheel_' + now,
+      type: 'reward',
+      title: `Hadiah Roda Keberuntungan (Lucky Wheel)`,
+      amount: `+${rpWon.toLocaleString()} RP`,
+      numericAmount: rpWon,
+      time: 'Baru saja',
+      date: 'Hari ini',
+      status: 'success',
+    };
+    setTransactions(prev => [newTx, ...prev]);
+
+    // Add to activity feed
+    const wheelActivity: ActivityFeedItem = {
+      id: 'act_wheel_' + now,
+      user: {
+        name: user.name,
+        username: user.username,
+        avatar: user.avatar,
+      },
+      type: rpWon >= 500 ? 'jackpot' : 'highscore',
+      title: `Menang Lucky Wheel`,
+      description: `memutar Lucky Wheel dan memenangkan +${rpWon.toLocaleString()} RP! 🎡`,
+      amount: `+${rpWon.toLocaleString()} RP`,
+      time: 'Baru saja',
+      badgeText: rpWon >= 500 ? 'Jackpot 👑' : 'Lucky 🎡',
+      badgeColor: rpWon >= 500 ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+    };
+    setActivities(prev => [wheelActivity, ...prev]);
+
+    // Update Lucky Wheel daily mission
+    setMissions(prev =>
+      prev.map(m => {
+        if (m.id === 'm6') {
+          return {
+            ...m,
+            progress: 1,
+            status: 'claimable',
+          };
+        }
+        return m;
+      })
+    );
+
+    showToast(`🎡 Putaran Sukses! +${rpWon.toLocaleString()} RP ditambahkan ke dompetmu!`, 'success');
+  };
+
+  const handleResetWheelCooldown = () => {
+    setUser(prev => ({
+      ...prev,
+      lastWheelSpinTimestamp: null,
+    }));
+  };
+
+  // REFERRAL: Claim Friend Bonus when Friend completes their first mission
+  const handleClaimFriendBonus = (friendId: string) => {
+    const friend = referralFriends.find(f => f.id === friendId);
+    if (!friend || friend.status !== 'mission_completed') return;
+
+    const bonus = friend.bonusRp;
+
+    // Credit user's wallet and referral total
+    setUser(prev => {
+      const nextRp = prev.rewardPoints + bonus;
+      return {
+        ...prev,
+        rewardPoints: nextRp,
+        estimatedIdr: nextRp,
+        referralRewardTotal: (prev.referralRewardTotal || 0) + bonus,
+      };
+    });
+
+    // Mark friend status as claimed
+    setReferralFriends(prev =>
+      prev.map(f =>
+        f.id === friendId ? { ...f, status: 'reward_claimed' as const } : f
+      )
+    );
+
+    // Add transaction
+    const newTx: TransactionItem = {
+      id: 'tx_ref_' + Date.now(),
+      type: 'referral',
+      title: `Bonus Undangan: ${friend.name} Selesaikan Misi Pertama`,
+      amount: `+${bonus.toLocaleString()} RP`,
+      numericAmount: bonus,
+      time: 'Baru saja',
+      date: 'Hari ini',
+      status: 'success',
+    };
+    setTransactions(prev => [newTx, ...prev]);
+
+    // Update mission "m5" ("Undang 1 Teman ke Nexa Play")
+    setMissions(prev =>
+      prev.map(m =>
+        m.id === 'm5' ? { ...m, progress: 1, status: 'claimable' as const } : m
+      )
+    );
+
+    showToast(`🎉 Bonus Referal Diklaim! +${bonus.toLocaleString()} RP berhasil masuk ke dompetmu!`, 'success');
+  };
+
+  // REFERRAL: Apply a friend's referral code for a welcome bonus
+  const handleApplyReferralCode = (code: string): boolean => {
+    if (user.referredBy) {
+      showToast('Kamu sudah pernah menerapkan kode referal sebelumnya.', 'info');
+      return false;
+    }
+
+    const welcomeBonus = 500;
+
+    setUser(prev => {
+      const nextRp = prev.rewardPoints + welcomeBonus;
+      return {
+        ...prev,
+        referredBy: code,
+        rewardPoints: nextRp,
+        estimatedIdr: nextRp,
+      };
+    });
+
+    const newTx: TransactionItem = {
+      id: 'tx_ref_welcome_' + Date.now(),
+      type: 'referral',
+      title: `Bonus Sambutan Kode Referal (${code})`,
+      amount: `+${welcomeBonus} RP`,
+      numericAmount: welcomeBonus,
+      time: 'Baru saja',
+      date: 'Hari ini',
+      status: 'success',
+    };
+    setTransactions(prev => [newTx, ...prev]);
+
+    return true;
+  };
+
+  // REFERRAL SIMULATION: Simulate a new friend registering with user's code
+  const handleSimulateNewFriend = () => {
+    const randomPick = SAMPLE_NAMES[Math.floor(Math.random() * SAMPLE_NAMES.length)];
+    const randomAvatar = SAMPLE_AVATARS[Math.floor(Math.random() * SAMPLE_AVATARS.length)];
+    const id = 'ref_sim_' + Date.now();
+
+    const newFriend: ReferralFriend = {
+      id,
+      name: randomPick.name,
+      username: `${randomPick.username}_${Math.floor(Math.random() * 899 + 100)}`,
+      avatar: randomAvatar,
+      invitedAt: 'Baru saja',
+      status: 'registered',
+      bonusRp: 2500,
+    };
+
+    setReferralFriends(prev => [newFriend, ...prev]);
+    showToast(`Teman baru "${newFriend.name}" baru saja mendaftar menggunakan kode referalmu!`, 'info');
+  };
+
+  // REFERRAL SIMULATION: Simulate an invited friend completing their first mission
+  const handleSimulateFriendMissionComplete = () => {
+    // Find registered friend or create a completed one
+    const registered = referralFriends.find(f => f.status === 'registered');
+
+    if (registered) {
+      setReferralFriends(prev =>
+        prev.map(f =>
+          f.id === registered.id
+            ? {
+                ...f,
+                status: 'mission_completed' as const,
+                firstMissionName: 'Check-in Harian & Skor Pertama',
+              }
+            : f
+        )
+      );
+      soundManager.playSuccess();
+      showToast(`Temanmu "${registered.name}" baru saja menyelesaikan misi pertamanya! Bonus +2,500 RP siap diklaim! 🎁`, 'success');
+    } else {
+      // Create new friend who just completed first mission
+      const randomPick = SAMPLE_NAMES[Math.floor(Math.random() * SAMPLE_NAMES.length)];
+      const randomAvatar = SAMPLE_AVATARS[Math.floor(Math.random() * SAMPLE_AVATARS.length)];
+      const id = 'ref_sim_done_' + Date.now();
+
+      const newFriend: ReferralFriend = {
+        id,
+        name: randomPick.name,
+        username: `${randomPick.username}_${Math.floor(Math.random() * 899 + 100)}`,
+        avatar: randomAvatar,
+        invitedAt: 'Baru saja',
+        status: 'mission_completed',
+        firstMissionName: 'Misi Coin Catcher Pertama',
+        bonusRp: 2500,
+      };
+
+      setReferralFriends(prev => [newFriend, ...prev]);
+      soundManager.playSuccess();
+      showToast(`Temanmu "${newFriend.name}" menyelesaikan misi pertamanya! Bonus +2,500 RP siap diklaim! 🎁`, 'success');
+    }
+  };
+
+  // ACTIVITY FEED: Simulate new community activities
+  const handleTriggerActivitySimulation = () => {
+    const randomPick = SAMPLE_NAMES[Math.floor(Math.random() * SAMPLE_NAMES.length)];
+    const randomAvatar = SAMPLE_AVATARS[Math.floor(Math.random() * SAMPLE_AVATARS.length)];
+    const randType = Math.random();
+
+    let newActivity: ActivityFeedItem;
+
+    if (randType < 0.45) {
+      // Cashout activity
+      const amounts = ['25.000', '50.000', '100.000'];
+      const methods = ['DANA', 'GoPay', 'OVO', 'ShopeePay', 'Bank BCA'];
+      const chosenAmt = amounts[Math.floor(Math.random() * amounts.length)];
+      const chosenMethod = methods[Math.floor(Math.random() * methods.length)];
+
+      newActivity = {
+        id: 'act_' + Date.now(),
+        user: {
+          name: randomPick.name,
+          username: `${randomPick.username}_${Math.floor(Math.random() * 89 + 10)}`,
+          avatar: randomAvatar,
+        },
+        type: 'cashout',
+        title: `Penarikan ${chosenMethod}`,
+        description: `baru saja mencairkan Rp ${chosenAmt} ke akun ${chosenMethod}`,
+        amount: `Rp ${chosenAmt}`,
+        time: 'Baru saja',
+        badgeText: 'Cashout 💸',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+      };
+    } else if (randType < 0.75) {
+      // Level Up activity
+      const lvl = Math.floor(Math.random() * 8) + 6;
+      newActivity = {
+        id: 'act_' + Date.now(),
+        user: {
+          name: randomPick.name,
+          username: `${randomPick.username}_${Math.floor(Math.random() * 89 + 10)}`,
+          avatar: randomAvatar,
+        },
+        type: 'level_up',
+        title: `Naik ke Level ${lvl} Player`,
+        description: `berhasil mencapai Level ${lvl} Player dan membuka hadiah level`,
+        amount: `Level ${lvl} 👑`,
+        time: 'Baru saja',
+        badgeText: 'Level Up 🏆',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+      };
+    } else {
+      // High score activity
+      const gameTitles = ['Coin Catcher', 'Number Rush', 'Color Reflex', 'Memory Match'];
+      const chosenGame = gameTitles[Math.floor(Math.random() * gameTitles.length)];
+      const pts = Math.floor(Math.random() * 800) + 700;
+      newActivity = {
+        id: 'act_' + Date.now(),
+        user: {
+          name: randomPick.name,
+          username: `${randomPick.username}_${Math.floor(Math.random() * 89 + 10)}`,
+          avatar: randomAvatar,
+        },
+        type: 'highscore',
+        title: `Rekor di ${chosenGame}`,
+        description: `mencetak skor impresif ${pts} Pts di ${chosenGame}`,
+        amount: `+${Math.floor(pts * 0.4)} RP`,
+        time: 'Baru saja',
+        badgeText: 'Skor Tinggi ⚡',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+      };
+    }
+
+    setActivities(prev => [newActivity, ...prev.slice(0, 19)]);
+  };
+
+  // Request Withdrawal
+  const handleRequestWithdrawal = (
+    method: string,
+    accountTarget: string,
+    accountName: string,
+    amountRp: number
+  ): boolean => {
+    if (user.rewardPoints < amountRp) {
+      return false;
+    }
+
+    // Deduct RP immediately
+    setUser(prev => ({
+      ...prev,
+      rewardPoints: prev.rewardPoints - amountRp,
+      estimatedIdr: prev.estimatedIdr - amountRp,
+    }));
+
+    const newTx: TransactionItem = {
+      id: 'tx_wd_' + Date.now(),
+      type: 'redeem',
+      title: `Penarikan Saldo ${method} (Rp ${amountRp.toLocaleString('id-ID')})`,
+      amount: `-${amountRp.toLocaleString()} RP`,
+      numericAmount: -amountRp,
+      time: 'Baru saja',
+      date: 'Hari ini',
+      status: 'pending',
+      method,
+      accountTarget,
+    };
+
+    setTransactions(prev => [newTx, ...prev]);
+
+    // Add to activity feed
+    const cashoutActivity: ActivityFeedItem = {
+      id: 'act_user_wd_' + Date.now(),
+      user: {
+        name: user.name,
+        username: user.username,
+        avatar: user.avatar,
+      },
+      type: 'cashout',
+      title: `Penarikan ${method}`,
+      description: `mengajukan penarikan Rp ${amountRp.toLocaleString('id-ID')} ke akun ${method}`,
+      amount: `Rp ${amountRp.toLocaleString('id-ID')}`,
+      time: 'Baru saja',
+      badgeText: 'Cashout 💸',
+      badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    };
+    setActivities(prev => [cashoutActivity, ...prev]);
+
+    return true;
+  };
+
+  // Admin approves withdrawal
+  const handleApproveWithdrawal = (txId: string) => {
+    const tx = transactions.find(t => t.id === txId);
+    if (!tx) return;
+
+    setTransactions(prev =>
+      prev.map(t =>
+        t.id === txId ? { ...t, status: 'success' as const } : t
+      )
+    );
+
+    const withdrawnAmount = Math.abs(tx.numericAmount);
+    setUser(prev => ({
+      ...prev,
+      totalWithdrawn: prev.totalWithdrawn + withdrawnAmount,
+    }));
+  };
+
+  // Admin rejects withdrawal
+  const handleRejectWithdrawal = (txId: string, reason?: string) => {
+    const tx = transactions.find(t => t.id === txId);
+    if (!tx) return;
+
+    const refundAmount = Math.abs(tx.numericAmount);
+
+    // Refund to user
+    setUser(prev => ({
+      ...prev,
+      rewardPoints: prev.rewardPoints + refundAmount,
+      estimatedIdr: prev.estimatedIdr + refundAmount,
+    }));
+
+    setTransactions(prev =>
+      prev.map(t =>
+        t.id === txId
+          ? {
+              ...t,
+              status: 'rejected' as const,
+              rejectionReason: reason || 'Permintaan dibatalkan admin',
+            }
+          : t
+      )
+    );
+  };
+
+  // Add test bonus for smooth demo
+  const handleAddTestBonus = () => {
+    setUser(prev => ({
+      ...prev,
+      rewardPoints: prev.rewardPoints + 5000,
+      estimatedIdr: prev.estimatedIdr + 5000,
+    }));
+
+    const newTx: TransactionItem = {
+      id: 'tx_bonus_' + Date.now(),
+      type: 'admin_adjustment',
+      title: 'Bonus Testing Saldo Developer',
+      amount: '+5,000 RP',
+      numericAmount: 5000,
+      time: 'Baru saja',
+      date: 'Hari ini',
+      status: 'success',
+    };
+    setTransactions(prev => [newTx, ...prev]);
+  };
+
+  // Reset demo
+  const handleResetData = () => {
+    localStorage.removeItem('nexa_user_v1');
+    localStorage.removeItem('nexa_games_v1');
+    localStorage.removeItem('nexa_missions_v1');
+    localStorage.removeItem('nexa_txs_v1');
+    localStorage.removeItem('nexa_achievements_v1');
+    localStorage.removeItem('nexa_referral_friends_v1');
+    localStorage.removeItem('nexa_activities_v1');
+
+    setUser(INITIAL_USER);
+    setGames(INITIAL_GAMES);
+    setMissions(INITIAL_MISSIONS);
+    setTransactions(INITIAL_TRANSACTIONS);
+    setAchievements(INITIAL_ACHIEVEMENTS);
+    setReferralFriends(INITIAL_REFERRAL_FRIENDS);
+    setActivities(INITIAL_ACTIVITIES);
+    setActiveTab('home');
+  };
+
+  const hasClaimableMissions = missions.some(m => m.status === 'claimable');
+  const claimableReferralCount = referralFriends.filter(f => f.status === 'mission_completed').length;
+  const hasNotifications = hasClaimableMissions || claimableReferralCount > 0;
+
+  return (
+    <div
+      data-theme={user.theme || 'deep-space'}
+      className={`min-h-screen transition-colors duration-300 flex flex-col font-sans selection:bg-cyan-500 selection:text-slate-950 ${
+        user.theme === 'light' ? 'bg-slate-100 text-slate-900 theme-light' : 'bg-slate-950 text-slate-100 theme-deep-space'
+      }`}
+    >
+      {/* Toast notifications */}
+      <ToastContainer toasts={toasts} onDismiss={handleDismissToast} />
+
+      {/* Header Bar */}
+      <Header
+        user={user}
+        onToggleSound={() => {
+          const next = !user.soundEnabled;
+          soundManager.setEnabled(next);
+          setUser(prev => ({ ...prev, soundEnabled: next }));
+        }}
+        onToggleTheme={() => {
+          const nextTheme = user.theme === 'light' ? 'deep-space' : 'light';
+          soundManager.playClick();
+          setUser(prev => ({ ...prev, theme: nextTheme }));
+          showToast(
+            nextTheme === 'light'
+              ? '☀️ Mode Terang (Aksesibilitas) aktif!'
+              : '🌌 Tema Deep Space aktif!',
+            'info'
+          );
+        }}
+        onNavigateTab={tab => {
+          soundManager.playClick();
+          setActiveTab(tab);
+        }}
+        activeTab={activeTab}
+      />
+
+      {/* User XP Progress Bar below Header */}
+      <UserXpProgressBar
+        user={user}
+        onNavigateTab={tab => {
+          soundManager.playClick();
+          setActiveTab(tab);
+        }}
+      />
+
+      {/* Main Container */}
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 pt-6 pb-24">
+        {activeTab === 'home' && (
+          <HomeTab
+            user={user}
+            games={games}
+            leaderboard={leaderboard}
+            missions={missions}
+            activities={activities}
+            transactions={transactions}
+            onCheckIn={handleCheckIn}
+            onLaunchGame={handleLaunchGame}
+            onNavigateTab={setActiveTab}
+            onOpenLeaderboard={() => setShowLeaderboard(true)}
+            onClaimMission={handleClaimMission}
+            onClaimDailyGoal={handleClaimDailyGoal}
+            onSpinLuckyWheel={handleSpinLuckyWheel}
+            onResetWheelCooldown={handleResetWheelCooldown}
+            onTriggerActivitySimulation={handleTriggerActivitySimulation}
+            claimableReferralCount={claimableReferralCount}
+            showToast={showToast}
+          />
+        )}
+
+        {activeTab === 'games' && (
+          <GamesTab
+            games={games}
+            user={user}
+            onLaunchGame={handleLaunchGame}
+            showToast={showToast}
+          />
+        )}
+
+        {activeTab === 'missions' && (
+          <MissionsTab
+            user={user}
+            missions={missions}
+            referralFriends={referralFriends}
+            onClaimMission={handleClaimMission}
+            onLaunchGame={handleLaunchGame}
+            onClaimFriendBonus={handleClaimFriendBonus}
+            onApplyReferralCode={handleApplyReferralCode}
+            onSimulateNewFriend={handleSimulateNewFriend}
+            onSimulateFriendMissionComplete={handleSimulateFriendMissionComplete}
+            showToast={showToast}
+          />
+        )}
+
+        {activeTab === 'wallet' && (
+          <WalletTab
+            user={user}
+            transactions={transactions}
+            onRequestWithdrawal={handleRequestWithdrawal}
+            onAddTestBonus={handleAddTestBonus}
+            showToast={showToast}
+          />
+        )}
+
+        {activeTab === 'profile' && (
+          <ProfileTab
+            user={user}
+            achievements={achievements}
+            games={games}
+            missions={missions}
+            referralFriends={referralFriends}
+            onUpdateUser={partial => setUser(prev => ({ ...prev, ...partial }))}
+            onNavigateTab={setActiveTab}
+            onResetData={handleResetData}
+            showToast={showToast}
+            onCheckIn={handleCheckIn}
+          />
+        )}
+
+        {activeTab === 'admin' && (
+          <AdminTab
+            user={user}
+            transactions={transactions}
+            onApproveWithdrawal={handleApproveWithdrawal}
+            onRejectWithdrawal={handleRejectWithdrawal}
+            onAddTestBonus={handleAddTestBonus}
+            showToast={showToast}
+          />
+        )}
+      </main>
+
+      {/* Floating Bottom Navigation */}
+      <Navbar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        hasClaimableMissions={hasNotifications}
+        isAdmin={user.role === 'admin'}
+      />
+
+      {/* Global Leaderboard Modal */}
+      <LeaderboardModal
+        isOpen={showLeaderboard}
+        onClose={() => setShowLeaderboard(false)}
+        leaderboard={leaderboard}
+      />
+
+      {/* Mini-Game Modal Overlays */}
+      {activeGame === 'coin-catcher' && (
+        <CoinCatcherGame
+          onClose={handleCloseGame}
+          onGameComplete={handleGameComplete}
+        />
+      )}
+
+      {activeGame === 'number-rush' && (
+        <NumberRushGame
+          onClose={handleCloseGame}
+          onGameComplete={handleGameComplete}
+        />
+      )}
+
+      {activeGame === 'memory-match' && (
+        <MemoryMatchGame
+          onClose={handleCloseGame}
+          onGameComplete={handleGameComplete}
+        />
+      )}
+
+      {activeGame === 'color-reflex' && (
+        <ColorReflexGame
+          onClose={handleCloseGame}
+          onGameComplete={handleGameComplete}
+        />
+      )}
+    </div>
+  );
+}
